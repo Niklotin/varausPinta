@@ -166,3 +166,62 @@ GET /api/bookings/Huone 1
 
 
 Haluatko, että käymme läpi jotain osaa tarkemmin tai lisätään jotain toiminnallisuutta?
+
+
+### TOINEN PROMPTI
+<Aloitin uuden keskustelun tekoälyn kanssa, jotta tämä unohtaisi edelliset ohjeet täysin, eikä menisi sekaisin tekemistäni muutoksista>
+Tässä on projektini lähdekoodin tiedostot <Lisäsin tiedostot tekoälylle>.
+Tässä on tehtävänanto:
+Tehtävänämme on toteuttaa yksinkertainen kokoushuoneiden varausrajapinta REST arkkitehtuuria käyttäen. APIn tulee tarjota seuraavat toiminnot:
+
+Varauksen luonti tietylle aikavälille, Varauksen peruutus sekä varauksen katselu jolla voidaan listata kaikki tietyn huoneen varaukset.
+
+Toimintalogiikan kolme pointtia:
+Varaukset eivät saa mennä päällekkäin, eli kaksi henkilöä ei voi varata samaa huonetta samaan aikaan.
+Varaukset eivät voi sijoittua menneisyyteen
+Aloitusajan täytyy olla ennen lopetusaikaa
+
+Tekniset reunaehdot:
+Käytössämme on ASP .net Core 10, eli suoritamme työn C# ohjelmointikielellä
+Käytetään muistinvaraista tietokantaa.
+
+Anna palautetta lähdekoodista, ja etsi sieltä myös kehityskohteita.
+
+
+### TOINEN VASTAUS
+
+Teknisesti koodisi on erinomaisella tasolla. Se on säieturvallinen, arkkitehtuuriltaan puhdas ja noudattaa .NET-maailman parhaita käytäntöjä (DI, Singleton).
+
+Jos haluamme hioa projektia, voimme tehdä myös syötteiden validoinnin (Input Validation) vielä yhdellä pienellä koodimuutoksella.
+
+
+Koodihiominen: Syötteiden validointi
+Tällä hetkellä, jos joku lähettää API:in varauksen ilman huoneen nimeä (roomName: null tai tyhjä), koodi saattaa kaatua tai sallia "nimetön huone" -varauksen.
+
+Ammattilainen estää tämän Data Annotations -merkinnöillä MeetingRoomBooking-mallissa.
+
+Päivitä MeetingRoomBooking.cs
+Lisäämme [Required]-attribuutit. Näin ASP.NET Core tarkistaa automaattisesti, että tiedot ovat mukana, ja palauttaa 400 Bad Request jos ne puuttuvat – ennen kuin koodi edes menee kontrolleriin.
+
+C#
+using System.ComponentModel.DataAnnotations;
+
+namespace varausPinta.Models
+{
+    public class MeetingRoomBooking
+    {
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "Huoneen nimi on pakollinen tieto.")]
+        public string RoomName { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Varaajan nimi on pakollinen tieto.")]
+        public string BookedBy { get; set; } = string.Empty;
+
+        [Required]
+        public DateTime StartTime { get; set; }
+
+        [Required]
+        public DateTime EndTime { get; set; }
+    }
+}
