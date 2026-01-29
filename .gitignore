@@ -1,0 +1,15 @@
+*.config
+*.v2
+*.vsidx
+.vs/varausPinta.slnx/v18/.suo
+*.json
+*.db
+*.db-shm
+*.db-wal
+*.dll
+*.exe
+*.pdb
+/varausPinta/obj
+varausPinta/varausPinta.csproj.user
+varausPinta/varausPinta.http
+varausPinta.slnx
