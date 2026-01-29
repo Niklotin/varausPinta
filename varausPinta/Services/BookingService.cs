@@ -24,6 +24,14 @@ namespace varausPinta.Services
             }
         }
 
+        public MeetingRoomBooking? GetBookingById(int id)
+        {
+            lock (_lock)
+            {
+                return _bookings.FirstOrDefault(b => b.Id == id);
+            }
+        }
+
         public MeetingRoomBooking? CreateBooking(MeetingRoomBooking newBooking)
         {
             //Lukitaan koko "tarkista ja tallenna" operaatio

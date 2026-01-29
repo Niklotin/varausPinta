@@ -225,3 +225,90 @@ namespace varausPinta.Models
         public DateTime EndTime { get; set; }
     }
 }
+
+
+
+### KOLMAS PROMPTI
+Projektin toteutus on tällä hetkellä ns "pragmaattinen REST", mitkä asiat korjaamalla saamme APIn noudattamaan täydellisesti REST arkkitehtuuria
+
+
+### KOLMAS VASTAUS
+Tämä on erinomainen kysymys.
+
+Miksi se on REST?
+Resurssipohjaisuus: Käsittelet "resursseja" (varauksia) URL-osoitteessa /api/bookings.
+
+HTTP-verbit: Käytät oikeita verbejä oikeisiin asioihin:
+
+GET tietojen hakuun.
+
+POST uuden luomiseen.
+
+DELETE poistamiseen.
+
+Stateless (Tilaton): Jokainen pyyntö sisältää kaiken tarvittavan tiedon, eikä palvelin muista edellistä HTTP-pyyntöä (vaikka data tallentuukin).
+
+JSON: Kommunikaatio tapahtuu standardissa JSON-muodossa.
+
+Miten teemme siitä "Senior-tason" REST APIn?
+Nykyisessä koodissa on yksi kauneusvirhe, joka liittyy HTTP-statuskoodeihin.
+
+Kun luot uuden varauksen (CreateBooking), palautat tällä hetkellä koodin 200 OK. REST-standardin mukaan uuden resurssin luomisen pitäisi palauttaa 201 Created. Lisäksi vastauksen tulisi sisältää Location-header, joka kertoo mistä uusi varaus löytyy.
+
+Korjataan tämä? Se vaatii kaksi pientä muutosta:
+
+Tarvitsemme metodin yhden varauksen hakemiseen ID:llä (jotta voimme viitata siihen).
+
+Muutamme POST-metodin palautusarvon.
+
+Vaihe 1: Lisää "Hae yksi" -metodi Serviceen ja Kontrolleriin
+Lisää ensin tämä BookingService.cs -tiedostoon:
+
+C#
+// Lisää tämä BookingService-luokkaan
+public MeetingRoomBooking? GetBookingById(int id)
+{
+    lock (_lock)
+    {
+        return _bookings.FirstOrDefault(b => b.Id == id);
+    }
+}
+Vaihe 2: Päivitä Kontrolleri (Tärkeä REST-korjaus)
+Muokataan MeetingRoomBookingsController.cs. Lisätään sinne GetById-endpoint ja päivitetään CreateBooking palauttamaan CreatedAtAction.
+
+C#
+// Lisää tämä uusi endpoint kontrolleriin
+[HttpGet("{id:int}")] // Huom: lisätty :int erottamaan se roomName-hausta
+public IActionResult GetBookingById(int id)
+{
+    var booking = _bookingService.GetBookingById(id);
+    if (booking == null) return NotFound();
+    return Ok(booking);
+}
+
+// PÄIVITÄ CreateBooking-metodi tällaiseksi:
+[HttpPost]
+public IActionResult CreateBooking(MeetingRoomBooking booking)
+{
+    // ... validointi pysyy samana ...
+    if (!ModelState.IsValid) return BadRequest(ModelState); // Hyödyntää aiempaa [Required] muutosta
+
+    var createdBooking = _bookingService.CreateBooking(booking);
+    
+    if (createdBooking == null)
+    {
+        return BadRequest("Varaus ei ole kelvollinen. Tarkista ajat ja päällekkäisyydet.");
+    }
+
+    // REST-KORJAUS: Palautetaan 201 Created ja Location-header
+    // Tämä kertoo: "Onnistui, ja uusi tieto löytyy osoitteesta /api/bookings/{id}"
+    return CreatedAtAction(nameof(GetBookingById), new { id = createdBooking.Id }, createdBooking);
+}
+Miksi tämä kannattaa tehdä?
+Tämä on juuri sellainen yksityiskohta, josta senior-kehittäjät nyökyttelevät hyväksyvästi.
+
+201 Created on täsmällisempi kuin 200 OK.
+
+Location-header auttaa asiakassovellusta (client) tietämään heti, mikä uuden varauksen ID on ja mistä se löytyy.
+
+GetBookingById on muutenkin hyödyllinen olla olemassa.
