@@ -10,41 +10,43 @@ namespace varausPinta.Controllers
     {
         private readonly BookingService _bookingService;
 
-        public MeetingRoomBookingsController()
+        //Injektoidaan riippuvuus, framework syöttää BookingServicen tähän
+        public MeetingRoomBookingsController(BookingService bookingService)
         {
-            _bookingService = new BookingService();
+            _bookingService = bookingService;
         }
 
-        // Varauksen luonti
         [HttpPost]
         public IActionResult CreateBooking(MeetingRoomBooking booking)
         {
-            if (!_bookingService.IsValidBooking(booking))
-                return BadRequest("Varaus ei ole kelvollinen. Tarkista ajat ja päällekkäisyydet.");
+            var createdBooking = _bookingService.CreateBooking(booking);
 
-            InMemoryDatabase.Bookings.Add(booking);
-            return Ok(booking);
+            if (createdBooking == null)
+            {
+                return BadRequest("Varaus ei ole kelvollinen. Tarkista ajat ja päällekkäisyydet.");
+            }
+
+            return Ok(createdBooking);
         }
 
-        // Varauksen peruutus
         [HttpDelete("{id}")]
         public IActionResult CancelBooking(int id)
         {
-            var booking = InMemoryDatabase.Bookings.FirstOrDefault(b => b.Id == id);
-            if (booking == null)
-                return NotFound();
+            var isDeleted = _bookingService.CancelBooking(id);
 
-            InMemoryDatabase.Bookings.Remove(booking);
+            if (!isDeleted)
+            {
+                return NotFound();
+            }
+
             return Ok();
         }
 
-        // Varauksen katselu
         [HttpGet("{roomName}")]
         public IActionResult GetBookings(string roomName)
         {
-            var bookings = InMemoryDatabase.Bookings.Where(b => b.RoomName == roomName).ToList();
+            var bookings = _bookingService.GetBookingsForRoom(roomName);
             return Ok(bookings);
         }
     }
-
 }
