@@ -312,3 +312,376 @@ T‰m‰ on juuri sellainen yksityiskohta, josta senior-kehitt‰j‰t nyˆkyttelev‰t hyv
 Location-header auttaa asiakassovellusta (client) tiet‰m‰‰n heti, mik‰ uuden varauksen ID on ja mist‰ se lˆytyy.
 
 GetBookingById on muutenkin hyˆdyllinen olla olemassa.
+
+
+### NELJƒS PROMPTI
+Kirjoita viel‰ skripti jolla saamme kokeiltua kaikkia APIn toimintoja, koska emme tied‰ saammeko k‰ytt‰‰ testauskirjastoja, niin kirjoita myˆs muutama pyyntˆ joilla voimme testata APIn tarkoituksellista toiminnallisuutta
+
+
+### NELJƒS VASTAUS
+
+Koska emme halua lis‰t‰ projektiin raskaita testauskirjastoja (kuten xUnit tai NUnit) t‰ss‰ vaiheessa, paras tapa on luoda yksinkertainen PowerShell-skripti. Se on luettava, toimii Windowsissa suoraan ja sill‰ voidaan testata dynaamisesti (esim. laskea huomisen p‰iv‰m‰‰r‰, jotta "menneisyys"-tarkistus ei est‰ testi‰).
+
+T‰m‰ skripti toimii ik‰‰n kuin "kˆyh‰n miehen integraatiotesti". Se k‰y l‰pi onnistuneet tapaukset sek‰ tahalliset virhetilanteet (reunaehdot).
+
+Vaihe 1: Selvit‰ API:n osoite
+Tarkista Visual Studiosta, miss‰ portissa sovelluksesi pyˆrii (esim. http://localhost:5123 tai https://localhost:7123). Lˆyd‰t sen Properties/launchSettings.json -tiedostosta tai kun k‰ynnist‰t sovelluksen selaimessa.
+
+Vaihe 2: Luo testiskripti
+Luo projektin juureen tiedosto nimelt‰ test_api.ps1 ja kopioi sinne alla oleva koodi. Muista muuttaa $baseUrl-muuttuja vastaamaan omaa porttiasi!
+
+PowerShell
+# Asetukset: MUUTA TƒMƒ VASTAAMAAN OMAA PORTTIASI
+$baseUrl = "http://localhost:5276" 
+$apiUrl = "$baseUrl/api/bookings"
+
+# Apufunktio tulostukseen
+function Print-Result ($testName, $status, $details = "") {
+    if ($status -eq "PASS") {
+        Write-Host "[PASS] $testName" -ForegroundColor Green
+    } else {
+        Write-Host "[FAIL] $testName" -ForegroundColor Red
+        if ($details) { Write-Host "       $details" -ForegroundColor Gray }
+    }
+}
+
+# Lasketaan ajat dynaamisesti, jotta testi toimii aina
+$today = Get-Date
+$tomorrowStart = $today.AddDays(1).ToString("yyyy-MM-ddTHH:00:00")
+$tomorrowEnd = $today.AddDays(1).ToString("yyyy-MM-ddTHH:30:00")
+$pastDate = $today.AddDays(-1).ToString("yyyy-MM-ddTHH:00:00")
+
+Write-Host "--- ALOITETAAN API-TESTAUS ($baseUrl) ---" -ForegroundColor Cyan
+
+# ---------------------------------------------------------
+# TESTI 1: Luodaan validi varaus (Happy Path)
+# ---------------------------------------------------------
+$body = @{
+    roomName = "Neukkari 1"
+    bookedBy = "Testaaja Teppo"
+    startTime = $tomorrowStart
+    endTime = $tomorrowEnd
+} | ConvertTo-Json
+
+try {
+    $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Body $body -ContentType "application/json" -ErrorAction Stop
+    
+    if ($response.id -gt 0 -and $response.roomName -eq "Neukkari 1") {
+        Print-Result "Validin varauksen luonti" "PASS"
+        $createdId = $response.id
+    } else {
+        Print-Result "Validin varauksen luonti" "FAIL" "Ei palauttanut ID:t‰"
+    }
+} catch {
+    $errorMsg = $_.Exception.Message
+    
+    # Yritet‰‰n lukea tarkempi syy vastauksen rungosta (jos sellainen on)
+    if ($_.Exception.Response) {
+        $stream = $_.Exception.Response.GetResponseStream()
+        if ($stream) {
+            $reader = New-Object System.IO.StreamReader($stream)
+            $detailedError = $reader.ReadToEnd()
+            $errorMsg = "$errorMsg -> SERVERIN VASTAUS: $detailedError"
+        }
+    }
+
+    Print-Result "Validin varauksen luonti" "FAIL" $errorMsg
+    exit # Lopetetaan t‰h‰n, koska ilman luontia muut testit eiv‰t toimi
+}
+}
+
+# ---------------------------------------------------------
+# TESTI 2: Est‰ p‰‰llekk‰inen varaus (Business Logic)
+# ---------------------------------------------------------
+# Yritet‰‰n varata sama huone samalle ajalle
+try {
+    Invoke-RestMethod -Uri $apiUrl -Method Post -Body $body -ContentType "application/json" -ErrorAction Stop
+    Print-Result "P‰‰llekk‰isyyden esto" "FAIL" "API salli p‰‰llekk‰isen varauksen (olisi pit‰nyt tulla 400)"
+} catch {
+    if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::BadRequest) {
+        Print-Result "P‰‰llekk‰isyyden esto" "PASS"
+    } else {
+        Print-Result "P‰‰llekk‰isyyden esto" "FAIL" "V‰‰r‰ virhekoodi: $($_.Exception.Response.StatusCode)"
+    }
+}
+
+# ---------------------------------------------------------
+# TESTI 3: Est‰ menneisyys (Business Logic)
+# ---------------------------------------------------------
+$pastBody = @{
+    roomName = "Neukkari 1"
+    bookedBy = "Martti McFly"
+    startTime = $pastDate
+    endTime = $today.ToString("yyyy-MM-ddTHH:00:00")
+} | ConvertTo-Json
+
+try {
+    Invoke-RestMethod -Uri $apiUrl -Method Post -Body $pastBody -ContentType "application/json" -ErrorAction Stop
+    Print-Result "Menneisyyden esto" "FAIL" "API salli varauksen menneisyyteen"
+} catch {
+    if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::BadRequest) {
+        Print-Result "Menneisyyden esto" "PASS"
+    } else {
+        Print-Result "Menneisyyden esto" "FAIL"
+    }
+}
+
+# ---------------------------------------------------------
+# TESTI 4: Est‰ Start > End (Business Logic)
+# ---------------------------------------------------------
+$invertedBody = @{
+    roomName = "Neukkari 1"
+    bookedBy = "Sekoilija"
+    startTime = $tomorrowEnd # Alkaa lopusta
+    endTime = $tomorrowStart # Loppuu alkuun
+} | ConvertTo-Json
+
+try {
+    Invoke-RestMethod -Uri $apiUrl -Method Post -Body $invertedBody -ContentType "application/json" -ErrorAction Stop
+    Print-Result "Aikaj‰rjestyksen tarkistus" "FAIL" "API salli alkamisajan olevan loppuajan j‰lkeen"
+} catch {
+    if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::BadRequest) {
+        Print-Result "Aikaj‰rjestyksen tarkistus" "PASS"
+    } else {
+        Print-Result "Aikaj‰rjestyksen tarkistus" "FAIL"
+    }
+}
+
+# ---------------------------------------------------------
+# TESTI 5: Hae luotu varaus ID:ll‰ (REST toiminnallisuus)
+# ---------------------------------------------------------
+try {
+    $getResponse = Invoke-RestMethod -Uri "$apiUrl/$createdId" -Method Get -ErrorAction Stop
+    if ($getResponse.bookedBy -eq "Testaaja Teppo") {
+        Print-Result "Varauksen haku ID:ll‰" "PASS"
+    } else {
+        Print-Result "Varauksen haku ID:ll‰" "FAIL" "Palautti v‰‰r‰‰ dataa"
+    }
+} catch {
+    Print-Result "Varauksen haku ID:ll‰" "FAIL" $_.Exception.Message
+}
+
+# ---------------------------------------------------------
+# TESTI 6: Poista varaus (REST toiminnallisuus)
+# ---------------------------------------------------------
+try {
+    Invoke-RestMethod -Uri "$apiUrl/$createdId" -Method Delete -ErrorAction Stop
+    # Varmistetaan poisto hakemalla se uudelleen (pit‰isi tulla 404)
+    try {
+        Invoke-RestMethod -Uri "$apiUrl/$createdId" -Method Get -ErrorAction Stop
+        Print-Result "Varauksen poisto" "FAIL" "Varaus lˆytyi viel‰ poiston j‰lkeen"
+    } catch {
+        if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::NotFound) {
+            Print-Result "Varauksen poisto" "PASS"
+        } else {
+            Print-Result "Varauksen poisto" "FAIL" "Poiston j‰lkeen tuli outo koodi: $($_.Exception.Response.StatusCode)"
+        }
+    }
+} catch {
+    Print-Result "Varauksen poisto" "FAIL" "DELETE-komento ep‰onnistui"
+}
+
+Write-Host "--- TESTAUS VALMIS ---" -ForegroundColor Cyan
+Miten ajat skriptin?
+K‰ynnist‰ API Visual Studiosta (vihre‰ nuoli "Start").
+
+Avaa PowerShell (voit avata sen Visual Studion terminaalista: View -> Terminal).
+
+Varmista, ett‰ olet samassa kansiossa kuin test_api.ps1.
+
+Aja komento:
+
+PowerShell
+./test_api.ps1
+Mit‰ t‰m‰ testaa?
+T‰m‰ skripti on erinomainen lis‰ palautukseen, koska se osoittaa:
+
+Toiminnallisuuden: Create, Read, Delete toimivat.
+
+Logiikan: Se todistaa, ett‰ p‰‰llekk‰isyydet ja aikavirheet estet‰‰n (saat vihre‰t PASS-merkinn‰t virhetilanteista).
+
+Dokumentaatio: Koodia lukemalla n‰kee heti, millaista JSON-dataa API odottaa.
+
+### VIIDES PROMPTI
+Skriptiss‰ oli virhe koodilla
+--- ALOITETAAN API-TESTAUS (http://localhost:5195) ---
+[FAIL] Validin varauksen luonti
+Et‰palvelin palautti virheen: (400) Virheellinen pyyntˆ. -> SERVERIN VASTAUS: {"type":"https://tools.ietf.org/html/rfc9110#section-15.5.1","title":"One or more validation errors occurred.","status":400,"errors":{"booking":["The booking field is required."],"$.endTime":["The JSON value could not be converted to System.DateTime. Path: $.endTime | LineNumber: 1 | BytePositionInLine: 37."]},"traceId":"00-b6c9fefe11e0d8750b97410603c829af-7d8ecb34694d5523-00"}
+
+Skriptiss‰ lienee jotain vialla, k‰y skripti l‰pi ja korjaa virheilmotuksen virhe.
+
+
+### VIIDES VASTAUS
+
+Virheviesti on hyvin selke‰: JSON-muunnos ep‰onnistui p‰iv‰m‰‰r‰n kohdalla.
+
+SERVERIN VASTAUS: ... "$.endTime":["The JSON value could not be converted to System.DateTime..."]
+
+T‰m‰ johtuu siit‰, ett‰ aiemmassa skriptiss‰ k‰ytt‰m‰ni p‰iv‰m‰‰r‰muotoilu ToString("yyyy-MM-ddTHH:00:00") oli hieman riskialtis, sill‰ PowerShell ja .NET saattavat tulkita tuon T-kirjaimen v‰‰rin (esim. aikamuotoilijana eik‰ kirjaimena) riippuen koneesi lokaaliasetuksista.
+
+Korjataan t‰m‰ k‰ytt‰m‰ll‰ varmaa ISO 8601 -standardimuotoilua ("s"), jonka .NET ymm‰rt‰‰ aina.
+
+Korjaus: P‰ivit‰ testiskriptin aikam‰‰ritykset
+Avaa test_api.ps1 ja korvaa rivit 17ñ20 (aikojen laskeminen) t‰ll‰ varmemmalla versiolla:
+
+PowerShell
+# KORJATTU AIKAMƒƒRITYS (K‰ytet‰‰n "s"-muotoilua, joka on ISO 8601 -yhteensopiva)
+$today = Get-Date
+# Huom: ToString("s") tuottaa muodon "2026-01-30T12:00:00"
+$tomorrowStart = $today.AddDays(1).ToString("s") 
+$tomorrowEnd = $today.AddDays(1).AddMinutes(30).ToString("s")
+$pastDate = $today.AddDays(-1).ToString("s")
+$todayStr = $today.ToString("s") # K‰ytet‰‰n menneisyystestin loppuaikana
+Sinun t‰ytyy myˆs p‰ivitt‰‰ TESTI 3 k‰ytt‰m‰‰n tuota $todayStr -muuttujaa, jotta senkin formaatti on oikein.
+
+T‰ss‰ on koko korjattu skripti (kopioi t‰m‰ kokonaan tiedoston p‰‰lle, niin virheet h‰vi‰v‰t):
+
+PowerShell
+# Asetukset: MUUTA TƒMƒ VASTAAMAAN OMAA PORTTIASI
+$baseUrl = "http://localhost:5195" 
+$apiUrl = "$baseUrl/api/bookings"
+
+# Apufunktio tulostukseen
+function Print-Result ($testName, $status, $details = "") {
+    if ($status -eq "PASS") {
+        Write-Host "[PASS] $testName" -ForegroundColor Green
+    } else {
+        Write-Host "[FAIL] $testName" -ForegroundColor Red
+        if ($details) { Write-Host "       $details" -ForegroundColor Gray }
+    }
+}
+
+Write-Host "--- ALOITETAAN API-TESTAUS ($baseUrl) ---" -ForegroundColor Cyan
+
+# KORJATTU AIKAMƒƒRITYS (ISO 8601 -yhteensopiva)
+$today = Get-Date
+$tomorrowStart = $today.AddDays(1).ToString("s") 
+$tomorrowEnd = $today.AddDays(1).AddMinutes(30).ToString("s")
+$pastDate = $today.AddDays(-1).ToString("s")
+$todayStr = $today.ToString("s") 
+
+# ---------------------------------------------------------
+# TESTI 1: Luodaan validi varaus (Happy Path)
+# ---------------------------------------------------------
+$body = @{
+    roomName = "Neukkari 1"
+    bookedBy = "Testaaja Teppo"
+    startTime = $tomorrowStart
+    endTime = $tomorrowEnd
+} | ConvertTo-Json
+
+try {
+    $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Body $body -ContentType "application/json" -ErrorAction Stop
+    
+    if ($response.id -gt 0 -and $response.roomName -eq "Neukkari 1") {
+        Print-Result "Validin varauksen luonti" "PASS"
+        $createdId = $response.id
+    } else {
+        Print-Result "Validin varauksen luonti" "FAIL" "Ei palauttanut ID:t‰"
+    }
+} catch {
+    $errorMsg = $_.Exception.Message
+    if ($_.Exception.Response) {
+        $stream = $_.Exception.Response.GetResponseStream()
+        if ($stream) {
+            $reader = New-Object System.IO.StreamReader($stream)
+            $detailedError = $reader.ReadToEnd()
+            $errorMsg = "$errorMsg -> SERVERIN VASTAUS: $detailedError"
+        }
+    }
+    Print-Result "Validin varauksen luonti" "FAIL" $errorMsg
+    exit 
+}
+
+# ---------------------------------------------------------
+# TESTI 2: Est‰ p‰‰llekk‰inen varaus (Business Logic)
+# ---------------------------------------------------------
+try {
+    Invoke-RestMethod -Uri $apiUrl -Method Post -Body $body -ContentType "application/json" -ErrorAction Stop
+    Print-Result "P‰‰llekk‰isyyden esto" "FAIL" "API salli p‰‰llekk‰isen varauksen"
+} catch {
+    if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::BadRequest) {
+        Print-Result "P‰‰llekk‰isyyden esto" "PASS"
+    } else {
+        Print-Result "P‰‰llekk‰isyyden esto" "FAIL" "V‰‰r‰ virhekoodi: $($_.Exception.Response.StatusCode)"
+    }
+}
+
+# ---------------------------------------------------------
+# TESTI 3: Est‰ menneisyys (Business Logic)
+# ---------------------------------------------------------
+$pastBody = @{
+    roomName = "Neukkari 1"
+    bookedBy = "Martti McFly"
+    startTime = $pastDate
+    endTime = $todayStr
+} | ConvertTo-Json
+
+try {
+    Invoke-RestMethod -Uri $apiUrl -Method Post -Body $pastBody -ContentType "application/json" -ErrorAction Stop
+    Print-Result "Menneisyyden esto" "FAIL" "API salli varauksen menneisyyteen"
+} catch {
+    if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::BadRequest) {
+        Print-Result "Menneisyyden esto" "PASS"
+    } else {
+        Print-Result "Menneisyyden esto" "FAIL"
+    }
+}
+
+# ---------------------------------------------------------
+# TESTI 4: Est‰ Start > End (Business Logic)
+# ---------------------------------------------------------
+$invertedBody = @{
+    roomName = "Neukkari 1"
+    bookedBy = "Sekoilija"
+    startTime = $tomorrowEnd 
+    endTime = $tomorrowStart 
+} | ConvertTo-Json
+
+try {
+    Invoke-RestMethod -Uri $apiUrl -Method Post -Body $invertedBody -ContentType "application/json" -ErrorAction Stop
+    Print-Result "Aikaj‰rjestyksen tarkistus" "FAIL" "API salli virheelliset ajat"
+} catch {
+    if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::BadRequest) {
+        Print-Result "Aikaj‰rjestyksen tarkistus" "PASS"
+    } else {
+        Print-Result "Aikaj‰rjestyksen tarkistus" "FAIL"
+    }
+}
+
+# ---------------------------------------------------------
+# TESTI 5: Hae luotu varaus ID:ll‰ (REST toiminnallisuus)
+# ---------------------------------------------------------
+try {
+    $getResponse = Invoke-RestMethod -Uri "$apiUrl/$createdId" -Method Get -ErrorAction Stop
+    if ($getResponse.bookedBy -eq "Testaaja Teppo") {
+        Print-Result "Varauksen haku ID:ll‰" "PASS"
+    } else {
+        Print-Result "Varauksen haku ID:ll‰" "FAIL" "Palautti v‰‰r‰‰ dataa"
+    }
+} catch {
+    Print-Result "Varauksen haku ID:ll‰" "FAIL" $_.Exception.Message
+}
+
+# ---------------------------------------------------------
+# TESTI 6: Poista varaus (REST toiminnallisuus)
+# ---------------------------------------------------------
+try {
+    Invoke-RestMethod -Uri "$apiUrl/$createdId" -Method Delete -ErrorAction Stop
+    
+    try {
+        Invoke-RestMethod -Uri "$apiUrl/$createdId" -Method Get -ErrorAction Stop
+        Print-Result "Varauksen poisto" "FAIL" "Varaus lˆytyi viel‰ poiston j‰lkeen"
+    } catch {
+        if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::NotFound) {
+            Print-Result "Varauksen poisto" "PASS"
+        } else {
+            Print-Result "Varauksen poisto" "FAIL" "Odotettiin 404, saatiin: $($_.Exception.Response.StatusCode)"
+        }
+    }
+} catch {
+    Print-Result "Varauksen poisto" "FAIL" "DELETE-komento ep‰onnistui"
+}
+
+Write-Host "--- TESTAUS VALMIS ---" -ForegroundColor Cyan
+Tallenna, ja aja ./test_api.ps1. Nyt pit‰isi tulla vihre‰‰ rivi‰!
